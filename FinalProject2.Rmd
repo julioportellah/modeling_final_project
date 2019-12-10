@@ -1,0 +1,1083 @@
+---
+title: "Final Project Report"
+subtitle: "Analysis of the Relationship between the Economic Freedom and the reduction of poverty in Hispanic American Countries"
+author: "Julio Portellla"
+date: "10/12/2019"
+output: word_document
+always_allow_html: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library('tidyverse') 
+library('leaflet')
+library('ggmap')
+library('GGally')
+library('viridis')
+library('plotly')
+library('IRdisplay')
+library('ggrepel')
+library('cowplot')
+library('jtools')
+library('car')
+library('MASS')
+library(knitr)
+library(dplyr)
+library(rms)
+library(caret)
+library(ROCR)
+library(ggplot2)
+library(cobalt)
+library(MatchIt)
+library(randomForest)
+library(mice)
+library(reshape2)
+library(grid)
+library(VIM)
+library(lattice)
+library(gridExtra)
+library(tree)
+library(tseries)
+library(forecast)
+get_legend<-function(myggplot){
+  tmp <- ggplot_gtable(ggplot_build(myggplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
+options(warn = -1)
+```
+
+## Introduction
+The purpose of this report is to explore the assiciation between the indicators of economical freedom and the reduction of poverty in hispanic american countries. This report begins with the description of the indicators to be used, the sources and some insights from the bibliographic sources. Next, the data section will explain some features of the data as well as the challenges in transforming them and merging them into one table. Then, the Exploratory Data Analysis is going to be performed over the economic freedom around the world data. Next, there's going to be a brief explanation of why the data investigation is limited to south american countries. In the Modelling section, many models are going to be created, tested and compared, the goal is to find the best predictors to get aliviate the poverty in hispanic american countries. On the time series section, we are going to generate a time series model to see how a change in an economic freedom indicator can change the poverty rate over the time. Finally, for the conclusion, the final results of the previous sections are going to be shown and with that some comparisons with existing works, further remarks and final thoughts.
+
+*** WRITE SOMETHING ABOUT THE INTROCUTION 
+--- Write about the economic freedom, the world bank and its data
+--- Finally, write about the difficutlties found in processing the data
+## DATA
+The two main sources used are from kaggle which are pre-processed. From the kaggle's data of the economic freedom index, it shows data from 1970 to 2016, the latest one is up to 2017. On the other hand, the kaggle's world bank poverty data has a different structure, below we can see the headers of both datasets.
+
+```{r, echo=FALSE}
+#First, we load the data
+econFreedomData <- read.csv(file="efw_cc.csv", header=TRUE, sep=",")
+#kable(head(econFreedomData), format = "html")
+head(econFreedomData)
+hisp_count=c('ARG','BOL','CHL','COL','CRI','ECU','DOM','ECU','SLV','GTM','HND','MEX','NIC','PAN','PRY','PER','URY','VEN')
+hispEconFreedomData2011 <- econFreedomData %>% filter(year >= 2011)
+hispEconFreedomData2011<-filter(hispEconFreedomData2011, ISO_code %in% hisp_count)
+```
+
+For the poverty data, the table will look like:
+
+```{r, echo=FALSE}
+poverty_FreedomData <- read.csv(file="wb_poverty_simple.csv", header=TRUE, sep=",")
+#kable(, format = "html")
+head(poverty_FreedomData)
+```
+
+First, it is necessary to see the missing data at the economic freedom index.
+
+```{r, echo=FALSE}
+options(repr.plot.width=6, repr.plot.height=6)
+missing_data <- econFreedomData %>% summarise_all(funs(sum(is.na(.))/n()))
+missing_data <- gather(missing_data, key = "variables", value = "percent_missing") 
+ggplot(missing_data, aes(x = reorder(variables, percent_missing), y = percent_missing*100)) +xlab('variables')+ ylab('Percent missing %')+
+  geom_bar(stat = "identity", fill = "red", aes(color = I('white')), size = 0.3)+coord_flip()+ theme_bw()
+```
+
+It looks like there is a lot of missing data for some indicators, but it is important to consider that the economic freedom data is not available in many countries and its estimation on the early years are limited to fewer countries compared to 2016. Let's see the missing data from 2007.
+
+```{r, echo=FALSE}
+econFreedomData_2007 <- econFreedomData %>% filter(year >= 2007)
+options(repr.plot.width=6, repr.plot.height=6)
+missing_data <- econFreedomData_2007 %>% summarise_all(funs(sum(is.na(.))/n()))
+missing_data <- gather(missing_data, key = "variables", value = "percent_missing") 
+ggplot(missing_data, aes(x = reorder(variables, percent_missing), y = percent_missing*100)) +xlab('variables')+ ylab('Percent missing %')+
+  geom_bar(stat = "identity", fill = "red", aes(color = I('white')), size = 0.3)+coord_flip()+ theme_bw()
+```
+
+We can see that there is less missing data percentage, now, let's limit to hisapnic american countries.
+
+```{r, echo=FALSE}
+econFreedomData_2007_hisp <- econFreedomData %>% filter(year >= 2007)
+econFreedomData_2007_hisp<-filter(econFreedomData_2007_hisp, ISO_code %in% hisp_count)
+options(repr.plot.width=6, repr.plot.height=6)
+missing_data <- econFreedomData_2007_hisp %>% summarise_all(funs(sum(is.na(.))/n()))
+missing_data <- gather(missing_data, key = "variables", value = "percent_missing") 
+ggplot(missing_data, aes(x = reorder(variables, percent_missing), y = percent_missing*100)) +xlab('variables')+ ylab('Percent missing %')+
+  geom_bar(stat = "identity", fill = "red", aes(color = I('white')), size = 0.3)+coord_flip()+ theme_bw()
+```
+
+There is no missing data for hispanic american countries from the year 2007.
+The data from the world bank is different, before joinig the tables, let's see the amount of missing data from the world from 2017.
+
+```{r, echo=FALSE}
+poverty_FreedomData <- read.csv(file="wb_poverty_simple.csv", header=TRUE, sep=",")
+poverty_FreedomData <- poverty_FreedomData[, -seq(from = 5, to = 51)]
+#poverty_FreedomData[1:(length(poverty_FreedomData)-1)]
+hisppoverty_FreedomData <- poverty_FreedomData
+#filter(hisppoverty_FreedomData, hisppoverty_FreedomData$Country.Code %in% hisp_count)
+
+#hisppoverty_FreedomData[ which(hisppoverty_FreedomData$Country.Code=='BOL'),]
+#hisppoverty_FreedomData<-hisppoverty_FreedomData[ which(hisppoverty_FreedomData$Country.Code %in% hisp_count),]
+
+
+#hisppoverty_FreedomData_fin <- hisppoverty_FreedomData[, -seq(from = 5, to = 55)]
+#hisppoverty_FreedomData_fin <- hisppoverty_FreedomData[, -seq(from = 11, to = 14)]
+#md.pattern(hisppoverty_FreedomData_fin)
+
+hisppoverty_FreedomData_simp <- hisppoverty_FreedomData[, -c(1,3)]
+hisppoverty_FreedomData_simp <- hisppoverty_FreedomData_simp[, -seq(from=13,to=16)]
+
+df1=stack(hisppoverty_FreedomData_simp)
+poverty_world<-reshape(hisppoverty_FreedomData_simp, direction = "long", varying = list(3:ncol(hisppoverty_FreedomData_simp)), idvar = "Country.Code")
+poverty_world$time<-poverty_world$time+2006
+
+names(poverty_world)[3]<-"year"
+names(poverty_world)[4]<-"Poverty"
+names(poverty_world)[1]<-"ISO_code"
+md.pattern(poverty_world)
+```
+
+From the world data, we can see that most of the data is actually missing. Let's limit it for hispanic american countries.
+
+```{r, echo=FALSE}
+poverty_FreedomData <- read.csv(file="wb_poverty_simple.csv", header=TRUE, sep=",")
+poverty_FreedomData <- poverty_FreedomData[, -seq(from = 5, to = 51)]
+#poverty_FreedomData[1:(length(poverty_FreedomData)-1)]
+hisppoverty_FreedomData <- poverty_FreedomData
+#filter(hisppoverty_FreedomData, hisppoverty_FreedomData$Country.Code %in% hisp_count)
+hisppoverty_FreedomData<-hisppoverty_FreedomData[ which(hisppoverty_FreedomData$Country.Code %in% hisp_count),]
+
+hisppoverty_FreedomData_simp <- hisppoverty_FreedomData[, -c(1,3)]
+hisppoverty_FreedomData_simp <- hisppoverty_FreedomData_simp[, -seq(from=13,to=16)]
+
+df1=stack(hisppoverty_FreedomData_simp)
+poverty_hisp<-reshape(hisppoverty_FreedomData_simp, direction = "long", varying = list(3:ncol(hisppoverty_FreedomData_simp)), idvar = "Country.Code")
+poverty_hisp$time<-poverty_hisp$time+2006
+
+names(poverty_hisp)[3]<-"year"
+names(poverty_hisp)[4]<-"Poverty"
+names(poverty_hisp)[1]<-"ISO_code"
+md.pattern(poverty_hisp)
+```
+
+For hispanic american countries, we can see that missing data is almost one third of the existing data, which give better options for the modeling, exploration, elimination of nulls and data recovery. 
+
+From the missing data for the economic freedom indicators, it can be observed that there are 25 sub areas, combined with the 5 areas and other fields it gives 36 predictors in total. According to the authors, they did not assign weights to each sub area because they are up to a point independent. Also, they expect that other researchers and people assign weight to each sub area, for practical purposes, they decided that the area final value is the average of all their subareas. {Add quotation}. It is expected to find multicolinearity as well as other issues, but this is for the modelling part.
+
+Finally, for this section, here is a table with all the fields that are going to be used from the processed data and their descriptions
+---SHOW A TABLE...IT IS GOING TO BE A LOT OF WORK!
+## EDA
+This section is divided in two parts, one for the global data and another for hispanic american countries, the purpose of this section is to explore and find any interesting trend.
+First of all, for the year 2016, the ranking of economical freedom total score vs tier looks like this
+
+```{r, echo=FALSE}
+econFreedomData_2016 <- econFreedomData %>% filter(year == 2016)
+a1 <- ggplot(econFreedomData_2016, aes(quartile,ECONOMIC.FREEDOM , size = -rank)) + 
+       geom_jitter(aes(color=countries, alpha=0.5)) +
+        theme_bw()+ theme(legend.position= "none")+
+        xlab("Quartile") + 
+        ggtitle("Economic Freedom Index 2016")
+a1
+```
+
+From this plot we can see that there are differences between the quartiles around the world. Adding the countries labels and adding a bar plot with the median value for the quartile, one observation can be inferred
+
+```{r, echo=FALSE}
+# Create a group-means data set
+econMedian <- econFreedomData_2016 %>% 
+        group_by(quartile) %>% 
+        summarise(
+          VAR1 = median(ECONOMIC.FREEDOM)
+        )
+econMedian <- econFreedomData_2016 %>% 
+        group_by(quartile) %>% 
+        summarise(ECONOMIC.FREEDOM = median(ECONOMIC.FREEDOM))
+#econFreedomData_2016 <- econFreedomData_2016 %>% mutate(quartile = factor(quartile, levels = c(1,2,3,4), labels = c("1st", "2nd","3rd","4th")))
+
+ggplot(econFreedomData_2016, aes(x = quartile, y = ECONOMIC.FREEDOM, color = quartile, fill = quartile)) +
+  geom_bar(data = econMedian, stat = "identity", alpha = .3) +
+  geom_point() +
+  guides(color = "none", fill = "none") +
+  theme_bw() +
+  labs(
+    title = "World Economic Freedom Index in 2016",
+    x = "Quartile",
+    y = "Score"
+  )
+#htmlwidgets::saveWidget(a1, "a1.html")
+#display_html('<iframe src="a1.html" width=100% height=450></iframe>')
+```
+
+From this plot, we can see that 1st tier countries tend to have a median score of 7.69 in economic freedom while the second tier has a a median value around 7.20. This means that both tiers have a small difference. On the third tier, the median score is 6.45 which is a greater difference with the second tier compared to the difference between the 1st and the 2nd. Finally the 4th tier has a median value of 5.82 which is also considerable.
+
+The purpose of these plots of economic freedom around the world is to see how it is distributed around the world.
+```{r, echo = FALSE}
+l <- list(color = toRGB("black"), width = 0.5)
+
+g <- list(showframe = FALSE,
+  showcoastlines = TRUE,
+  projection = list(type = 'Mercator'))
+
+p1 <- plot_geo(econFreedomData_2016) %>%
+  add_trace(z = ~ECONOMIC.FREEDOM, color = ~ECONOMIC.FREEDOM, colors = 'RdYlBu',
+    text = ~econFreedomData_2016$countries, locations = ~econFreedomData_2016$ISO_code, marker = list(line = l)) %>%
+  colorbar(title = 'Countries' , tickprefix = 'EF Score: ') %>%
+  layout(title = 'Economic Freedom 2016')
+p1
+```
+
+Now, let's see the relationship between the economic freedom and each area, without sub-areas
+
+```{r, echo=FALSE}
+options(repr.plot.width=8, repr.plot.height=4)
+
+plot_grid(ggplot(econFreedomData_2016, aes(econFreedomData_2016$X1_size_government, ECONOMIC.FREEDOM)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("1.Government Size") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(econFreedomData_2016, aes(econFreedomData_2016$X2_property_rights, ECONOMIC.FREEDOM)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("2.Property Rights") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(econFreedomData_2016, aes(econFreedomData_2016$X3_sound_money, ECONOMIC.FREEDOM)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("3.Sound Money") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+    ggplot(econFreedomData_2016, aes(econFreedomData_2016$X4_trade, ECONOMIC.FREEDOM)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("4.Trade") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+    ggplot(econFreedomData_2016, aes(econFreedomData_2016$X5_regulation, ECONOMIC.FREEDOM)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("5.Regulation") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+        align = 'h')
+```
+
+We can see that the trend looks linear for almost all the areas except for sound money, which looks non-linear, this will require further analysis. Also Government's size looks like it has the lowest scope, up to the point that the points look like they are aranged on random pattern rather than a trend.
+
+Now, let's see the last graphic but grouped by quartiles
+```{r, echo=FALSE}
+# 1. Create the plots
+#++++++++++++++++++++++++++++++++++
+# Create a box plot
+ap <-   ggplot(econFreedomData_2016, aes(X1_size_government, ECONOMIC.FREEDOM)) + 
+geom_point(aes(shape=as.factor(econFreedomData_2016$quartile), color=as.factor(econFreedomData_2016$quartile)  ))+
+xlab("Government\'s size") + ylab("Economic Freedom")+
+    labs(shape="Tier", colour="Tier")
+bp <-   ggplot(econFreedomData_2016, aes(X2_property_rights, ECONOMIC.FREEDOM)) + 
+geom_point(aes(shape=as.factor(econFreedomData_2016$quartile), color=as.factor(econFreedomData_2016$quartile)  ))+
+xlab("Property Rights") + ylab("Economic Freedom")+
+    labs(shape="Tier", colour="Tier") +
+  theme(legend.position="none")
+cp <-   ggplot(econFreedomData_2016, aes(X3_sound_money, ECONOMIC.FREEDOM)) + 
+geom_point(aes(shape=as.factor(econFreedomData_2016$quartile), color=as.factor(econFreedomData_2016$quartile)  ))+
+xlab("Property Rights") + ylab("Economic Freedom")+
+    labs(shape="Tier", colour="Tier") +
+  theme(legend.position="none")
+dp <-   ggplot(econFreedomData_2016, aes(X4_trade, ECONOMIC.FREEDOM)) + 
+geom_point(aes(shape=as.factor(econFreedomData_2016$quartile), color=as.factor(econFreedomData_2016$quartile)  ))+
+xlab("Trade") + ylab("Economic Freedom")+
+    labs(shape="Tier", colour="Tier") +
+  theme(legend.position="none")
+ep <-   ggplot(econFreedomData_2016, aes(X5_regulation, ECONOMIC.FREEDOM)) + 
+geom_point(aes(shape=as.factor(econFreedomData_2016$quartile), color=as.factor(econFreedomData_2016$quartile)  ))+
+xlab("Regulations") + ylab("Economic Freedom")+
+    labs(shape="Tier", colour="Tier") +
+  theme(legend.position="none")
+# 2. Save the legend
+#+++++++++++++++++++++++
+legend <- get_legend(ap)
+# 3. Remove the legend from the box plot
+#+++++++++++++++++++++++
+ap <- ap + theme(legend.position="none")
+
+blankPlot <- ggplot()+geom_blank(aes(1,1)) + 
+  cowplot::theme_nothing()
+
+# 4. Arrange ggplot2 graphs with a specific width
+grid.arrange(ap,bp, cp,blankPlot,dp,ep, legend, ncol=4, widths=c(2.3, 2.3,2.3, 0.8))
+```
+
+From the plots, we can see that government size is well spred between the 4 quartiles while in the rest of the areas there is a difference between each quartile and the concentration of economic freedom scores with the respective areas. This could mean that government's size is not strongly associated with economic freedom.
+
+In this graph, we show the percentage of people in poverty in 2016 around the world.
+
+```{r, echo = FALSE}
+poverty_world_2016 <- poverty_world %>% filter(year == 2016)
+l <- list(color = toRGB("black"), width = 0.5)
+
+g <- list(showframe = FALSE,
+  showcoastlines = TRUE,
+  projection = list(type = 'Mercator'))
+
+p1 <- plot_geo(poverty_world_2016) %>%
+  add_trace(z = ~Poverty, color = ~Poverty, colors = 'RdYlBu', locations = ~poverty_world_2016$ISO_code, marker = list(line = l)) %>%
+  colorbar(title = 'Countries' , tickprefix = 'Poverty Percentage: ') %>%
+  layout(title = 'Reported Poverty in 2016')
+p1
+```
+
+We can see that for the year 2016, the data is limited, fortunatelly, the data that is going to be used is going to be from the year 2007 to 2016. 
+For the next part, there will be an explanation of why the study is limited to hispanic american countries compared and some exploratory plots using only data filtered to hispanic american countries. As well as other plots that explore other deep observations before generating the model.
+
+## Why limiting the Analysis into Hispanic American Countries
+According to the world economic forum, different countries around different continents reported different progress in their goal to eradicate extreme poverty. Eradication of poverty is linked to different factors, such as culture, current political situations, wars, etc. To find a good model for the reduction of poverty levels in different countries these factors should be considered, which can increase significantely the complexity of the analysis and the model. In order to simplify the model and remove complexities in the study, the scope of the project was limited to hispanic american countries(Countries from america where spanish is the majority and official language). Hispanic  countries tend to have not only the same main language, but also a very similar demographic, similar culture, main religion (catholicism), similar strong holidays and even their popular sport, with some exceptions. Other considerations in the final decision is the availability of poverty data from the world bank, from one the plots in the data section, we saw that for this data has a greater proportions of nulls than reported data at worldwide level, while for hispanic countries tend to have more filled data than null data.
+
+From the global map, we can see that most of the hispanic american countries are between the 2nd and 3rd quartile
+```{r, echo = FALSE}
+econFreedomData_2016_hisp <- econFreedomData_2007_hisp %>% filter(year == 2016)
+l <- list(color = toRGB("black"), width = 0.5)
+
+g <- list(showframe = FALSE,
+  showcoastlines = TRUE,
+  projection = list(type = 'Mercator'))
+
+p1 <- plot_geo(econFreedomData_2016_hisp) %>%
+  add_trace(z = ~quartile, color = ~quartile, colors = 'Greens',
+    text = ~econFreedomData_2016_hisp$countries, locations = ~econFreedomData_2016_hisp$ISO_code, marker = list(line = l)) %>%
+  colorbar(title = 'Countries' , tickprefix = 'Quartile: ') %>%
+  layout(title = 'Economic Freedom 2016 in Hispanic countries')
+p1
+```
+
+From the color codes, we can see that it has countries in all the quartiles. Let's see with more detail what countries, their score and the median for each quartile.
+
+```{r, echo=FALSE}
+# Create a group-means data set
+econMedian <- econFreedomData_2016_hisp %>% 
+        group_by(quartile) %>% 
+        summarise(
+          VAR1 = median(ECONOMIC.FREEDOM)
+        )
+econMedian <- econFreedomData_2016_hisp %>% 
+        group_by(quartile) %>% 
+        summarise(ECONOMIC.FREEDOM = median(ECONOMIC.FREEDOM))
+#econFreedomData_2016 <- econFreedomData_2016 %>% mutate(quartile = factor(quartile, levels = c(1,2,3,4), labels = c("1st", "2nd","3rd","4th")))
+
+ggplot(econFreedomData_2016_hisp, aes(x = quartile, y = ECONOMIC.FREEDOM, color = quartile, fill = quartile)) +
+  geom_bar(data = econMedian, stat = "identity", alpha = .3) +
+  ggrepel::geom_text_repel(aes(label = countries), color = "black", size = 2.5, segment.color = "grey") +
+  geom_point() +
+  guides(color = "none", fill = "none") +
+  theme_bw() +
+  labs(
+    title = "Economic Freedom Index in 2016 in Hispanic Countries",
+    x = "Quartile",
+    y = "Score"
+  )
+#htmlwidgets::saveWidget(a1, "a1.html")
+#display_html('<iframe src="a1.html" width=100% height=450></iframe>')
+```
+
+From the countries, we can see that the first 3 quartiles have closer median values, even Mexico is closer to the 2nd quartile than Colombia in terms of economic freedom. The median value difference for the first 3 quartiles is lower than 0.5 in the economic freedom score. On the other hand, there is a big difference between the 4th quartile and the rest with a median value of 5.45 it has a difference over 1.25, much more than the rest of the other countries.
+
+Now, let's see if there is a difference in the areas vs economical freedom score. One thing to consider is that the data used is from the year 2007 to the year 2016 because if the 2016 data is only used there would be few data to generate a model.
+
+```{r, echo=FALSE}
+options(repr.plot.width=8, repr.plot.height=4)
+
+plot_grid(ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X1_size_government, ECONOMIC.FREEDOM)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("1.Government Size") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X2_property_rights, ECONOMIC.FREEDOM)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("2.Property Rights") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X3_sound_money, ECONOMIC.FREEDOM)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("3.Sound Money") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+    ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X4_trade, ECONOMIC.FREEDOM)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("4.Trade") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+    ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X5_regulation, ECONOMIC.FREEDOM)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("5.Regulation") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+        align = 'h')
+```
+
+Compared to the world plots, there all the areas have a relationship with the economic freedom. The biggest change is in the government size which its slope is positive while the one for the world was close to 0. 
+Let's look for non linearities in Sound Money, Regulation and Trade
+For Sound money:
+```{r, echo=FALSE}
+options(repr.plot.width=8, repr.plot.height=4)
+
+plot_grid(ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X3a_money_growth, ECONOMIC.FREEDOM)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Money Growth") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X3b_std_inflation, ECONOMIC.FREEDOM)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Inflation\'s standard deviation") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X3c_inflation, ECONOMIC.FREEDOM)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Inflation") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+    ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X3d_freedom_own_foreign_currency, ECONOMIC.FREEDOM)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Freedom to own foreign currency") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+        align = 'h')
+```
+Inflation seems to be a variable with non-linear components. This can be useful for a the model.
+
+```{r, echo=FALSE}
+options(repr.plot.width=8, repr.plot.height=4)
+
+plot_grid(ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X4a_tariffs, ECONOMIC.FREEDOM)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Tariffs") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X5b_labor_market_reg, ECONOMIC.FREEDOM)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Labor Market Regulation") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X4c_black_market, ECONOMIC.FREEDOM)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Black Market") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+    ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X4d_control_movement_capital_ppl, ECONOMIC.FREEDOM)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Control movement of capital") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+        align = 'h')
+```
+
+From all the sub-areas, the interesting one is the control of movement of capital which will require a transformation.
+
+For regulations:
+```{r, echo=FALSE}
+options(repr.plot.width=8, repr.plot.height=4)
+
+plot_grid(ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X5a_credit_market_reg, ECONOMIC.FREEDOM)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Credit market regulations") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X5b_labor_market_reg, ECONOMIC.FREEDOM)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Labor market regulation") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(econFreedomData_2007_hisp, aes(econFreedomData_2007_hisp$X5c_business_reg, ECONOMIC.FREEDOM)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Business regulation") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+        align = 'h')
+```
+It looks like Business regulation has some non-linearities, however, they do not look very significant.
+Finally, let's see how the quartiles are distributed across the economic freedom areas
+
+```{r, echo=FALSE}
+# 1. Create the plots
+#++++++++++++++++++++++++++++++++++
+# Create a box plot
+ap <-   ggplot(econFreedomData_2007_hisp, aes(X1_size_government, ECONOMIC.FREEDOM)) + 
+geom_point(aes(shape=as.factor(econFreedomData_2007_hisp$quartile), color=as.factor(econFreedomData_2007_hisp$quartile)  ))+
+xlab("Government\'s size") + ylab("Economic Freedom")+
+    labs(shape="Tier", colour="Tier")
+bp <-   ggplot(econFreedomData_2007_hisp, aes(X2_property_rights, ECONOMIC.FREEDOM)) + 
+geom_point(aes(shape=as.factor(econFreedomData_2007_hisp$quartile), color=as.factor(econFreedomData_2007_hisp$quartile)  ))+
+xlab("Property Rights") + ylab("Economic Freedom")+
+    labs(shape="Tier", colour="Tier") +
+  theme(legend.position="none")
+cp <-   ggplot(econFreedomData_2007_hisp, aes(X3_sound_money, ECONOMIC.FREEDOM)) + 
+geom_point(aes(shape=as.factor(econFreedomData_2007_hisp$quartile), color=as.factor(econFreedomData_2007_hisp$quartile)  ))+
+xlab("Property Rights") + ylab("Economic Freedom")+
+    labs(shape="Tier", colour="Tier") +
+  theme(legend.position="none")
+dp <-   ggplot(econFreedomData_2007_hisp, aes(X4_trade, ECONOMIC.FREEDOM)) + 
+geom_point(aes(shape=as.factor(econFreedomData_2007_hisp$quartile), color=as.factor(econFreedomData_2007_hisp$quartile)  ))+
+xlab("Trade") + ylab("Economic Freedom")+
+    labs(shape="Tier", colour="Tier") +
+  theme(legend.position="none")
+ep <-   ggplot(econFreedomData_2007_hisp, aes(X5_regulation, ECONOMIC.FREEDOM)) + 
+geom_point(aes(shape=as.factor(econFreedomData_2007_hisp$quartile), color=as.factor(econFreedomData_2007_hisp$quartile)  ))+
+xlab("Regulations") + ylab("Economic Freedom")+
+    labs(shape="Tier", colour="Tier") +
+  theme(legend.position="none")
+# 2. Save the legend
+#+++++++++++++++++++++++
+legend <- get_legend(ap)
+# 3. Remove the legend from the box plot
+#+++++++++++++++++++++++
+ap <- ap + theme(legend.position="none")
+
+blankPlot <- ggplot()+geom_blank(aes(1,1)) + 
+  cowplot::theme_nothing()
+
+# 4. Arrange ggplot2 graphs with a specific width
+grid.arrange(ap,bp, cp,blankPlot,dp,ep, legend, ncol=4, widths=c(2.3, 2.3,2.3, 0.8))
+```
+Compared to the plots for the freedoms around the world, we can see that all the tiers have differences between each other, including in Government's size, this means that the final model can consider government size areas as final predictors.
+
+## Modelling
+For the modelling it is imporant to join both tables and make some adjustments to the variables. One thing to consider in that the poverty variable is the percentage of poverty in the country, thus it is limited between 0 and 100. This means that it will require a transformation. Another useful transformation is to calculate the number of people who are not poor, this will give more interpretability to the model because it the positive predictors are going be related with the decrease of poverty. Also, considering this restrictions over the data can make the recovery of data possible, which will be done later.
+For the first models, the null data are going to be ommited and the predicted variable is going to be transformed.
+```{r, echo=FALSE}
+hisp_merged <- merge(econFreedomData_2007_hisp,poverty_world,by=c("ISO_code","year"))
+#md.pattern(hisp_merged_ommited)
+hisp_merged_ommited <- na.omit(hisp_merged)
+#hist(hisp_merged_ommited$Poverty)
+
+plot_grid(
+  ggplot(hisp_merged_ommited,aes(Poverty))+geom_histogram(fill="cyan",colour="black", limits=c(0,100))+ scale_x_continuous(breaks = seq(0,100,10)),
+  ggplot(hisp_merged_ommited,aes(log((Poverty/100)/(1-(Poverty/100)))))+geom_histogram(fill="cyan",colour="black"),
+  ggplot(hisp_merged_ommited,aes(log((1-Poverty/100)/(1-(1-Poverty/100)))))+geom_histogram(fill="cyan",colour="black"),
+align='h')
+```
+
+From these plots, it looks like the transformations have a shape closer than the normal distribution. COnsidering that this data has to be transformed in order to apply the linear regression, the chosen transformation will be the logit transformation of the percentage of people out of poverty because of the interpretability.
+
+$$NotPovertyLogit=ln(\frac{1-Poverty}{Poverty})$$
+
+After applying the transformation it is time to look for non linearities that can be useful for the model using linear regression
+```{r, echo=FALSE}
+hisp_merged_ommited$not_poverty_logit<-log((1-hisp_merged_ommited$Poverty/100)/(1-(1-hisp_merged_ommited$Poverty/100)))
+```
+
+```{r, echo=FALSE}
+plot_grid(ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X1_size_government, not_poverty_logit)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("1.Government Size") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X2_property_rights, not_poverty_logit)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("2.Property Rights") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X3_sound_money, not_poverty_logit)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("3.Sound Money") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+    ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X4_trade, not_poverty_logit)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("4.Trade") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+    ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X5_regulation, not_poverty_logit)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("5.Regulation") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+        align = 'h')
+
+#  ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X3c_inflation, not_poverty_logit)) +
+#geom_point(color='#E69F00', alpha = 0.5)+
+#xlab("Inflation") + ylab("Economic Freedom")+
+#geom_smooth(method = loess)+theme_bw()
+```
+
+
+
+```{r, echo=FALSE}
+options(repr.plot.width=8, repr.plot.height=4)
+
+plot_grid(ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X3a_money_growth, not_poverty_logit)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Money Growth") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X3b_std_inflation, not_poverty_logit)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Inflation\'s standard deviation") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X3c_inflation, not_poverty_logit)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Inflation") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+    ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X3d_freedom_own_foreign_currency, not_poverty_logit)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Freedom to own foreign currency") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+        align = 'h')
+```
+
+```{r, echo=FALSE}
+options(repr.plot.width=8, repr.plot.height=4)
+
+plot_grid(ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X4a_tariffs, not_poverty_logit)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Tariffs") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X5b_labor_market_reg, not_poverty_logit)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Labor Market Regulation") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X4c_black_market, not_poverty_logit)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Black Market") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+    ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X4d_control_movement_capital_ppl, not_poverty_logit)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Control movement of capital") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+        align = 'h')
+```
+
+
+```{r, echo=FALSE}
+options(repr.plot.width=8, repr.plot.height=4)
+
+plot_grid(ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X5a_credit_market_reg, not_poverty_logit)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Credit market regulations") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X5b_labor_market_reg, not_poverty_logit)) + 
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Labor market regulation") + ylab("Economic Freedom")+
+geom_smooth(method = lm)+theme_bw(),
+    ggplot(hisp_merged_ommited, aes(hisp_merged_ommited$X5c_business_reg, not_poverty_logit)) +
+geom_point(color='#E69F00', alpha = 0.5)+
+xlab("Business regulation") + ylab("Economic Freedom")+
+geom_smooth(method = loess)+theme_bw(),
+        align = 'h')
+```
+There are three sub areas: "Business Reegulation", "Control movement of capital" and "Inflation" that may need non-linear components before being incorporated into the model. For the model the first thing that are going to be discharted are the areas because they are related to sub-areas which gives a high score in multicolinearity.
+```{r, echo=FALSE}
+hisp_merged_ommited$X5c_business_reg_sq<-hisp_merged_ommited$X5c_business_reg^2
+hisp_merged_ommited$X4d_control_movement_capital_ppl_sq<-hisp_merged_ommited$X4d_control_movement_capital_ppl^2
+hisp_merged_ommited$X3c_inflation_sq<-hisp_merged_ommited$X3c_inflation^2
+##Training data
+set.seed(100)
+smp_size <- floor(0.7 * nrow(hisp_merged_ommited))
+train_ind <- sample(seq_len(nrow(hisp_merged_ommited)), size = smp_size)
+
+train <- hisp_merged_ommited[train_ind, ]
+test <- hisp_merged_ommited[-train_ind, ]
+
+model_1 <-lm(not_poverty_logit~X1a_government_consumption+X1b_transfers+X1c_gov_enterprises+X1d_top_marg_tax_rate+X2a_judicial_independence+X2b_impartial_courts+X2c_protection_property_rights+X2d_military_interference+X2e_integrity_legal_system+X2f_legal_enforcement_contracts+X2g_restrictions_sale_real_property+X2h_reliability_police+X2i_business_costs_crime+X2j_gender_adjustment+X3a_money_growth+X3b_std_inflation+X3c_inflation+X3c_inflation_sq+X3d_freedom_own_foreign_currency+train$X4a_tariffs+train$X4b_regulatory_trade_barriers+train$X4c_black_market+train$X4d_control_movement_capital_ppl+train$X4d_control_movement_capital_ppl_sq+train$X5a_credit_market_reg+train$X5b_labor_market_reg+train$X5c_business_reg+train$X5c_business_reg_sq,data=train)
+summary(model_1)
+step <- stepAIC(model_1, direction="both")
+```
+
+```{r, echo=FALSE}
+step <- stepAIC(model_1, direction="both")
+step
+```
+
+```{r, echo=FALSE}
+model2<-lm(formula = not_poverty_logit ~ X1b_transfers + X1c_gov_enterprises + 
+    X1d_top_marg_tax_rate + X2a_judicial_independence + X2b_impartial_courts + 
+    X2c_protection_property_rights + X2d_military_interference + 
+    X2e_integrity_legal_system + X2f_legal_enforcement_contracts + 
+    X2g_restrictions_sale_real_property + X2h_reliability_police + 
+    X2i_business_costs_crime + X3b_std_inflation + X3d_freedom_own_foreign_currency + 
+    train$X4a_tariffs + train$X4b_regulatory_trade_barriers + 
+    train$X4d_control_movement_capital_ppl + train$X5c_business_reg + 
+    train$X5c_business_reg_sq, data = train)
+summary(model2)
+```
+Using the VIF coefficient, the next step is to remove all the high VIF predictors
+
+```{r, echo=FALSE}
+sort(vif(model2))
+model3<-lm(formula = not_poverty_logit ~ X1b_transfers + X1c_gov_enterprises + 
+    X1d_top_marg_tax_rate + X2a_judicial_independence + X2b_impartial_courts + 
+    X2d_military_interference + 
+    X2e_integrity_legal_system + X2f_legal_enforcement_contracts + 
+    X2g_restrictions_sale_real_property + X2h_reliability_police + 
+    X2i_business_costs_crime + X3b_std_inflation + X3d_freedom_own_foreign_currency + 
+    X4a_tariffs + X4b_regulatory_trade_barriers + 
+    X4d_control_movement_capital_ppl, data = train)
+sort(vif(model3))
+summary(model3)
+```
+The current model is going to be used for the imputed values, but there is still room to optimize the model, time to dischart predictors by the Pr(>t)
+```{r, echo=FALSE}
+model4<-lm(formula = not_poverty_logit ~ X2a_judicial_independence + X2b_impartial_courts + 
+    X2d_military_interference + X1b_transfers+
+    X2e_integrity_legal_system + 
+    X2g_restrictions_sale_real_property + X2h_reliability_police + 
+    X3d_freedom_own_foreign_currency + 
+    X4a_tariffs + X4d_control_movement_capital_ppl, data = train)
+summary(model4)
+```
+
+This final model using linear regression has interesting observations. For hispanic american countries, the variables that tend to reduce the poverty are: judicial independence, ingegrity of legal system, restrictions to sale real property, reliability of police, greedom to won foreign currency and control movement capital of people. This could suggest over all that if hispanic countries want to reduce their poverty, they should improve their justice system.
+
+To see if the model follow the linearity principles, let's see the plots
+```{r}
+options(repr.plot.width=6, repr.plot.height=6)
+par(mfrow = c(1, 4))
+plot(model4)
+```
+
+The only concerning thing is the residual vs fitted which looks like there is a trend, it has wave like form.
+
+To see if the model is significant, let's use it with test data and find the R^2
+```{r, echo=FALSE}
+Predict <- predict(model4,test[,-1])
+test$test_efw <- Predict
+
+# Now, we need to test the r square between actual and predicted efw 
+r <- cor(test$not_poverty_logit,test$test_efw)
+rsquared <- cor(test$not_poverty_logit,test$test_efw)^2
+rsquared
+```
+
+The performance of the model dropped significantelly from the train data to the test data, this could mean that this is overfitted.
+
+Now, let's use random forest and see the new model
+
+```{r, echo=FALSE}
+hisp_model_tree <-tree(not_poverty_logit~X1a_government_consumption+X1b_transfers+X1c_gov_enterprises+X1d_top_marg_tax_rate+X2a_judicial_independence+X2b_impartial_courts+X2c_protection_property_rights+X2d_military_interference+X2e_integrity_legal_system+X2f_legal_enforcement_contracts+X2g_restrictions_sale_real_property+X2h_reliability_police+X2i_business_costs_crime+X2j_gender_adjustment+X3a_money_growth+X3b_std_inflation+X3c_inflation+X3c_inflation_sq+X3d_freedom_own_foreign_currency+X4a_tariffs+X4b_regulatory_trade_barriers+X4c_black_market+X4d_control_movement_capital_ppl+X4d_control_movement_capital_ppl_sq+X5a_credit_market_reg+X5b_labor_market_reg+X5c_business_reg+X5c_business_reg_sq,data=train)
+summary(hisp_model_tree)
+plot(hisp_model_tree)
+text(hisp_model_tree)
+```
+
+
+
+```{r, echo=FALSE}
+Predict <- predict(hisp_model_tree,train[,-1])
+train$test_efw <- Predict
+
+# Now, we need to test the r square between actual and predicted efw 
+r <- cor(train$not_poverty_logit,train$test_efw)
+rsquared <- cor(train$not_poverty_logit,train$test_efw)^2
+rsquared
+```
+
+```{r, echo=FALSE}
+Predict <- predict(hisp_model_tree,test[,-1])
+#pred <- predict(hisp_model_tree, test) 
+#predict.list <- predict(hisp_model_tree, test)
+test$test_efw <- Predict
+
+# Now, we need to test the r square between actual and predicted efw 
+r <- cor(test$not_poverty_logit,test$test_efw)
+rsquared <- cor(test$not_poverty_logit,test$test_efw)^2
+
+rsquared
+
+```
+It looks like the decision treee based model performs better than the linear regression. However, interpretability is a little more difficult.
+Now, let's test the model under imputed data. The first consideration is to apply the imputation model using the predictors that are going to be in the final model. In this case, the final linear regression model's predictors are going to be used for the imputation.
+
+```{r, echo=FALSE}
+hisp_merged <- merge(econFreedomData_2007_hisp,poverty_world,by=c("ISO_code","year"))
+hisp_merged_recovered<-hisp_merged
+hisp_merged_recovered$not_poverty_logit<-ifelse(is.na(hisp_merged$Poverty),NA,log((1-hisp_merged$Poverty/100)/(1-(1-hisp_merged$Poverty/100))))
+
+
+#model4<-lm(formula = not_poverty_logit ~ X2a_judicial_independence + X2b_impartial_courts + 
+#    X2d_military_interference + X1b_transfers+
+#    X2e_integrity_legal_system + 
+#    X2g_restrictions_sale_real_property + X2h_reliability_police + 
+#    X3d_freedom_own_foreign_currency + 
+#    X4a_tariffs + X4d_control_movement_capital_ppl, data = train)
+
+poverty_imp <- mice(hisp_merged_recovered,m=10,defaultMethod=c("pmm","logreg","polyreg","polr"),print=F)
+pred<-poverty_imp$predictorMatrix
+#train$
+pred["not_poverty_logit","ISO_code"]<-0
+pred["not_poverty_logit","year"]<-0
+pred["not_poverty_logit","ECONOMIC.FREEDOM"]<-0
+pred["not_poverty_logit","rank"]<-0
+pred["not_poverty_logit","quartile"]<-0
+pred["not_poverty_logit","Poverty"]<-0
+####
+pred["not_poverty_logit","X1a_government_consumption"]<-0
+pred["not_poverty_logit","X1c_gov_enterprises"]<-0
+pred["not_poverty_logit","X1d_top_marg_tax_rate"]<-0
+pred["not_poverty_logit","X2c_protection_property_rights"]<-0
+pred["not_poverty_logit","X2f_legal_enforcement_contracts"]<-0
+pred["not_poverty_logit","X2i_business_costs_crime"]<-0
+pred["not_poverty_logit","X2j_gender_adjustment"]<-0
+pred["not_poverty_logit","X3a_money_growth"]<-0
+pred["not_poverty_logit","X3b_std_inflation"]<-0
+pred["not_poverty_logit","X3c_inflation"]<-0
+pred["not_poverty_logit","X4b_regulatory_trade_barriers"]<-0
+pred["not_poverty_logit","X4c_black_market"]<-0
+pred["not_poverty_logit","X5a_credit_market_reg"]<-0
+pred["not_poverty_logit","X5b_labor_market_reg"]<-0
+pred["not_poverty_logit","X5c_business_reg"]<-0
+
+#hisp_model_tree <-tree(not_poverty_logit~X1a_government_consumption+X1c_gov_enterprises+X1d_top_marg_tax_rate+X2c_protection_property_rights+X2f_legal_enforcement_contracts+X2i_business_costs_crime+X2j_gender_adjustment+X3a_money_growth+X3b_std_inflation+X3c_inflation+X3c_inflation_sq+X4b_regulatory_trade_barriers+X4c_black_market+X4d_control_movement_capital_ppl_sq+X5a_credit_market_reg+X5b_labor_market_reg+X5c_business_reg+X5c_business_reg_sq,data=train)
+
+nhanes_imp <- mice(hisp_merged_recovered,m=10,defaultMethod=c("pmm","logreg","polyreg","polr"),predictorMatrix = pred)
+nhanes_subset_comp <-  complete(nhanes_imp, 10)
+densityplot(nhanes_imp)
+#stripplot(nhanes_imp, bmxbmi~riagendr+age, col=c("grey","darkred"),pch=c(1,20))
+stripplot(nhanes_imp, col=c("grey","darkred"),pch=c(1,20))
+
+smp_size <- floor(0.7 * nrow(nhanes_subset_comp))
+train_ind <- sample(seq_len(nrow(nhanes_subset_comp)), size = smp_size)
+
+train <- nhanes_subset_comp[train_ind, ]
+test <- nhanes_subset_comp[-train_ind, ]
+```
+
+After performing the imputation, the next step is to divide it into test and training data, then repeat the process and see if the model performs better
+
+```{r, echo=FALSE}
+model4_imp<-lm(formula = not_poverty_logit ~ X2a_judicial_independence + X2b_impartial_courts + 
+    X2d_military_interference + X1b_transfers+
+    X2e_integrity_legal_system + 
+    X2g_restrictions_sale_real_property + X2h_reliability_police + 
+    X3d_freedom_own_foreign_currency + 
+    X4a_tariffs + X4d_control_movement_capital_ppl, data = train)
+summary(model4_imp)
+```
+
+We can see that the R^2 is good and the predictors are good. The next step is to Check linearity assumptions
+
+```{r}
+options(repr.plot.width=6, repr.plot.height=6)
+par(mfrow = c(2, 2))
+plot(model4_imp)
+```
+
+We can see that the residual vs fitted is better than the one from the model with no-null values
+Let's test the model with imputed data
+```{r, echo=FALSE}
+Predict <- predict(model4_imp,test[,-1])
+test$test_efw <- Predict
+
+# Now, we need to test the r square between actual and predicted efw 
+r <- cor(test$not_poverty_logit,test$test_efw)
+rsquared <- cor(test$not_poverty_logit,test$test_efw)^2
+rsquared
+```
+
+From this R^2, it is certain to say that the model has a good performance and thus it is important to recover the data on the model
+
+```{r, echo=FALSE}
+train$Poverty_perc<-train$Poverty/100
+train$X3c_inflation_sq<-train$X3c_inflation^2
+train$X4d_control_movement_capital_ppl_sq<-train$X4d_control_movement_capital_ppl^2
+train$X5c_business_reg_sq<-train$X5c_business_reg^2
+library (betareg)
+model_beta<-betareg(Poverty_perc ~ year+ X1a_government_consumption+X1b_transfers+X1c_gov_enterprises+X1d_top_marg_tax_rate+X2a_judicial_independence+X2b_impartial_courts+X2c_protection_property_rights+X2d_military_interference+X2e_integrity_legal_system+X2f_legal_enforcement_contracts+X2g_restrictions_sale_real_property+X2h_reliability_police+X2i_business_costs_crime+X2j_gender_adjustment+X3a_money_growth+X3b_std_inflation+X3c_inflation+X3c_inflation_sq+X3d_freedom_own_foreign_currency+X4a_tariffs+X4b_regulatory_trade_barriers+X4c_black_market+X4d_control_movement_capital_ppl+X4d_control_movement_capital_ppl_sq+X5a_credit_market_reg+X5b_labor_market_reg+X5c_business_reg+X5c_business_reg_sq, data = train)
+summary(model_beta)
+```
+
+```{r, echo=FALSE}
+model_beta<-betareg(Poverty_perc ~ X1a_government_consumption +X1c_gov_enterprises+X2b_impartial_courts +X2c_protection_property_rights+X2d_military_interference+X2h_reliability_police+X2j_gender_adjustment+X3a_money_growth+X3d_freedom_own_foreign_currency+X4b_regulatory_trade_barriers+X5b_labor_market_reg, data = train)
+summary(model_beta)
+```
+
+## Time Series
+```{r, echo=FALSE}
+hisp_merged <- merge(econFreedomData_2007_hisp,poverty_world,by=c("ISO_code","year"))
+hisp_merged_recovered<-hisp_merged
+hisp_merged_recovered$not_poverty_logit<-ifelse(is.na(hisp_merged$Poverty),NA,log((1-hisp_merged$Poverty/100)/(1-(1-hisp_merged$Poverty/100))))
+
+
+#model4<-lm(formula = not_poverty_logit ~ X2a_judicial_independence + X2b_impartial_courts + 
+#    X2d_military_interference + X1b_transfers+
+#    X2e_integrity_legal_system + 
+#    X2g_restrictions_sale_real_property + X2h_reliability_police + 
+#    X3d_freedom_own_foreign_currency + 
+#    X4a_tariffs + X4d_control_movement_capital_ppl, data = train)
+
+poverty_imp <- mice(hisp_merged_recovered,m=10,defaultMethod=c("pmm","logreg","polyreg","polr"),print=F)
+pred<-poverty_imp$predictorMatrix
+#train$
+pred["not_poverty_logit","ISO_code"]<-0
+pred["not_poverty_logit","ECONOMIC.FREEDOM"]<-0
+pred["not_poverty_logit","rank"]<-0
+pred["not_poverty_logit","quartile"]<-0
+pred["not_poverty_logit","Poverty"]<-0
+####
+pred["not_poverty_logit","X1a_government_consumption"]<-0
+pred["not_poverty_logit","X1c_gov_enterprises"]<-0
+pred["not_poverty_logit","X1d_top_marg_tax_rate"]<-0
+pred["not_poverty_logit","X2c_protection_property_rights"]<-0
+pred["not_poverty_logit","X2f_legal_enforcement_contracts"]<-0
+pred["not_poverty_logit","X2i_business_costs_crime"]<-0
+pred["not_poverty_logit","X2j_gender_adjustment"]<-0
+pred["not_poverty_logit","X3a_money_growth"]<-0
+pred["not_poverty_logit","X3b_std_inflation"]<-0
+pred["not_poverty_logit","X3c_inflation"]<-0
+pred["not_poverty_logit","X4b_regulatory_trade_barriers"]<-0
+pred["not_poverty_logit","X4c_black_market"]<-0
+pred["not_poverty_logit","X5a_credit_market_reg"]<-0
+pred["not_poverty_logit","X5b_labor_market_reg"]<-0
+pred["not_poverty_logit","X5c_business_reg"]<-0
+
+#hisp_model_tree <-tree(not_poverty_logit~X1a_government_consumption+X1c_gov_enterprises+X1d_top_marg_tax_rate+X2c_protection_property_rights+X2f_legal_enforcement_contracts+X2i_business_costs_crime+X2j_gender_adjustment+X3a_money_growth+X3b_std_inflation+X3c_inflation+X3c_inflation_sq+X4b_regulatory_trade_barriers+X4c_black_market+X4d_control_movement_capital_ppl_sq+X5a_credit_market_reg+X5b_labor_market_reg+X5c_business_reg+X5c_business_reg_sq,data=train)
+
+nhanes_imp <- mice(hisp_merged_recovered,m=10,defaultMethod=c("pmm","logreg","polyreg","polr"),predictorMatrix = pred)
+nhanes_subset_comp <-  complete(nhanes_imp, 10)
+densityplot(nhanes_imp)
+#stripplot(nhanes_imp, bmxbmi~riagendr+age, col=c("grey","darkred"),pch=c(1,20))
+stripplot(nhanes_imp, col=c("grey","darkred"),pch=c(1,20))
+
+smp_size <- floor(0.7 * nrow(nhanes_subset_comp))
+train_ind <- sample(seq_len(nrow(nhanes_subset_comp)), size = smp_size)
+
+train <- nhanes_subset_comp[train_ind, ]
+test <- nhanes_subset_comp[-train_ind, ]
+```
+
+
+Testing AR Model
+```{r, echo=FALSE}
+model4_imp_alt<-lm(formula = not_poverty_logit ~ X2a_judicial_independence + X2b_impartial_courts + 
+    X2d_military_interference + X1b_transfers+
+    X2e_integrity_legal_system + 
+    X2g_restrictions_sale_real_property + X2h_reliability_police + 
+    X3d_freedom_own_foreign_currency + year+
+    X4a_tariffs + X4d_control_movement_capital_ppl, data = train)
+summary(model4_imp_alt)
+boxplot(model4_imp$residual~year,data=train, main="Residuals vs time",
+   xlab="years", ylab="Residuals")
+acf(model4_imp$resid)
+pacf(model4_imp$resid)
+anova(model4_imp_alt,model4_imp)
+tsresidecon <- ts(model4_imp_alt$residual)
+ts.plot(tsresidecon,col="blue4")
+
+```
+
+
+```{r, echo=FALSE}
+
+
+tsregmelanoma1 <- arima(train$not_poverty_logit, order = c(1, 0, 0), xreg = cbind(train$X2a_judicial_independence, train$X2b_impartial_courts,train$X2d_military_interference, train$X1b_transfers,train$X2e_integrity_legal_system, train$X2g_restrictions_sale_real_property, train$X2h_reliability_police, train$X3d_freedom_own_foreign_currency, train$year, train$X4a_tariffs, train$X4d_control_movement_capital_ppl))
+tsregmelanoma1
+
+ggplot(train, aes(x=year, y=tsregmelanoma1$residual)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_hline(yintercept=0,col="red3") + labs(title="Residuals vs Year")
+
+ggplot(train, aes(x=year, y=tsregmelanoma1$residual)) + 
+  geom_boxplot() +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_hline(yintercept=0,col="red3") + labs(title="Residuals vs Year")
+boxplot(tsregmelanoma1$residual~year,data=train, main="Car Milage Data",
+   xlab="Number of Cylinders", ylab="Miles Per Gallon")
+
+acf(tsregmelanoma1$residual)
+pacf(tsregmelanoma1$residual)
+
+```
+
+Let's try the MA model
+```{r, echo=FALSE}
+
+
+tsregmelanoma2 <- arima(train$not_poverty_logit, order = c(0, 0, 1), xreg = cbind(train$X2a_judicial_independence, train$X2b_impartial_courts,train$X2d_military_interference, train$X1b_transfers,train$X2e_integrity_legal_system, train$X2g_restrictions_sale_real_property, train$X2h_reliability_police, train$X3d_freedom_own_foreign_currency, train$year, train$X4a_tariffs, train$X4d_control_movement_capital_ppl))
+tsregmelanoma2
+
+ggplot(train, aes(x=year, y=tsregmelanoma2$residual)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_hline(yintercept=0,col="red3") + labs(title="Residuals vs Year")
+
+acf(tsregmelanoma2$residual)
+pacf(tsregmelanoma2$residual)
+
+```
+
+```{r, echo=FALSE}
+auto.arima(train$not_poverty_logit,xreg = cbind(train$X2a_judicial_independence, train$X2b_impartial_courts,train$X2d_military_interference, train$X1b_transfers,train$X2e_integrity_legal_system, train$X2g_restrictions_sale_real_property, train$X2h_reliability_police, train$X3d_freedom_own_foreign_currency, train$X4a_tariffs, train$X4d_control_movement_capital_ppl))
+auto.arima(train$not_poverty_logit,xreg = cbind(train$X2a_judicial_independence, train$X2b_impartial_courts,train$X2d_military_interference, train$X1b_transfers,train$X2e_integrity_legal_system, train$X2g_restrictions_sale_real_property, train$X2h_reliability_police, train$X3d_freedom_own_foreign_currency, train$year, train$X4a_tariffs, train$X4d_control_movement_capital_ppl))
+#auto.arima(cancersun$melanoma,xreg = cbind(cancersun$prevsunspot, cancersun$year))
+```
+
+Now, let's try to predict the poverty of the current year given the previous year economic freedom data, in this case, it is important to generate a new dataset.
+```{r, echo=FALSE}
+econFreedomData_prev_2007_hisp <- econFreedomData %>% filter(year >= 2006 & year<2016)
+econFreedomData_prev_2007_hisp<-filter(econFreedomData_prev_2007_hisp, ISO_code %in% hisp_count)
+econFreedomData_prev_2007_hisp$year<-econFreedomData_prev_2007_hisp$year+1
+dyn_hisp_merged <- merge(econFreedomData_2007_hisp,poverty_world,by=c("ISO_code","year"))
+dyn_hisp_merged$not_poverty_logit<-ifelse(is.na(dyn_hisp_merged$Poverty),NA,log((1-dyn_hisp_merged$Poverty/100)/(1-(1-dyn_hisp_merged$Poverty/100))))
+#md.pattern(hisp_merged_ommited)
+dyn_poverty_imp <- mice(dyn_hisp_merged,m=10,defaultMethod=c("pmm","logreg","polyreg","polr"),print=F)
+pred<-dyn_poverty_imp$predictorMatrix
+#train$
+pred["not_poverty_logit","ISO_code"]<-0
+pred["not_poverty_logit","ECONOMIC.FREEDOM"]<-0
+pred["not_poverty_logit","rank"]<-0
+pred["not_poverty_logit","quartile"]<-0
+pred["not_poverty_logit","Poverty"]<-0
+####
+pred["not_poverty_logit","X1a_government_consumption"]<-0
+pred["not_poverty_logit","X1c_gov_enterprises"]<-0
+pred["not_poverty_logit","X1d_top_marg_tax_rate"]<-0
+pred["not_poverty_logit","X2c_protection_property_rights"]<-0
+pred["not_poverty_logit","X2f_legal_enforcement_contracts"]<-0
+pred["not_poverty_logit","X2i_business_costs_crime"]<-0
+pred["not_poverty_logit","X2j_gender_adjustment"]<-0
+pred["not_poverty_logit","X3a_money_growth"]<-0
+pred["not_poverty_logit","X3b_std_inflation"]<-0
+pred["not_poverty_logit","X3c_inflation"]<-0
+pred["not_poverty_logit","X4b_regulatory_trade_barriers"]<-0
+pred["not_poverty_logit","X4c_black_market"]<-0
+pred["not_poverty_logit","X5a_credit_market_reg"]<-0
+pred["not_poverty_logit","X5b_labor_market_reg"]<-0
+pred["not_poverty_logit","X5c_business_reg"]<-0
+
+#hisp_model_tree <-tree(not_poverty_logit~X1a_government_consumption+X1c_gov_enterprises+X1d_top_marg_tax_rate+X2c_protection_property_rights+X2f_legal_enforcement_contracts+X2i_business_costs_crime+X2j_gender_adjustment+X3a_money_growth+X3b_std_inflation+X3c_inflation+X3c_inflation_sq+X4b_regulatory_trade_barriers+X4c_black_market+X4d_control_movement_capital_ppl_sq+X5a_credit_market_reg+X5b_labor_market_reg+X5c_business_reg+X5c_business_reg_sq,data=train)
+
+dyn_nhanes_imp <- mice(dyn_hisp_merged,m=10,defaultMethod=c("pmm","logreg","polyreg","polr"),predictorMatrix = pred)
+dyn_nhanes_subset_comp <-  complete(dyn_nhanes_imp, 10)
+densityplot(dyn_nhanes_imp)
+#stripplot(nhanes_imp, bmxbmi~riagendr+age, col=c("grey","darkred"),pch=c(1,20))
+stripplot(dyn_nhanes_imp, col=c("grey","darkred"),pch=c(1,20))
+
+smp_size <- floor(0.7 * nrow(dyn_nhanes_subset_comp))
+train_ind <- sample(seq_len(nrow(dyn_nhanes_subset_comp)), size = smp_size)
+
+dtrain <- dyn_nhanes_subset_comp[train_ind, ]
+dtest <- dyn_nhanes_subset_comp[-train_ind, ]
+```
+
+
+```{r, echo=FALSE}
+dmodel4_imp<-lm(formula = not_poverty_logit ~ X2a_judicial_independence + X2b_impartial_courts + 
+    X2d_military_interference + X1b_transfers+
+    X2e_integrity_legal_system +year +
+    X2g_restrictions_sale_real_property + X2h_reliability_police + 
+    X3d_freedom_own_foreign_currency + 
+    X4a_tariffs + X4d_control_movement_capital_ppl, data = dtrain)
+summary(dmodel4_imp)
+```
+
+```{r, echo=FALSE}
+options(repr.plot.width=6, repr.plot.height=6)
+par(mfrow = c(2, 2))
+plot(dmodel4_imp)
+```
+
+```{r, echo=FALSE}
+Predict <- predict(dmodel4_imp,dtest[,-1])
+dtest$test_efw <- Predict
+
+# Now, we need to test the r square between actual and predicted efw 
+r <- cor(dtest$not_poverty_logit,dtest$test_efw)
+rsquared <- cor(dtest$not_poverty_logit,dtest$test_efw)^2
+rsquared
+```
+
+```{r, echo=FALSE}
+
+
+tsregmelanoma3 <- arima(dtrain$not_poverty_logit, order = c(0, 0, 1), xreg = cbind(dtrain$X2a_judicial_independence, dtrain$X2b_impartial_courts,dtrain$X2d_military_interference, dtrain$X1b_transfers,dtrain$X2e_integrity_legal_system, dtrain$X2g_restrictions_sale_real_property, dtrain$X2h_reliability_police, dtrain$X3d_freedom_own_foreign_currency, dtrain$year, dtrain$X4a_tariffs, dtrain$X4d_control_movement_capital_ppl))
+tsregmelanoma3
+
+ggplot(dtrain, aes(x=year, y=tsregmelanoma2$residual)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_hline(yintercept=0,col="red3") + labs(title="Residuals vs Year")
+
+acf(tsregmelanoma3$residual)
+pacf(tsregmelanoma3$residual)
+
+```
+
+```{r, echo=FALSE}
+auto.arima(train$not_poverty_logit,xreg = cbind(train$X2a_judicial_independence, train$X2b_impartial_courts,train$X2d_military_interference, train$X1b_transfers,train$X2e_integrity_legal_system, train$X2g_restrictions_sale_real_property, train$X2h_reliability_police, train$X3d_freedom_own_foreign_currency, train$X4a_tariffs, train$X4d_control_movement_capital_ppl))
+auto.arima(train$not_poverty_logit,xreg = cbind(train$X2a_judicial_independence, train$X2b_impartial_courts,train$X2d_military_interference, train$X1b_transfers,train$X2e_integrity_legal_system, train$X2g_restrictions_sale_real_property, train$X2h_reliability_police, train$X3d_freedom_own_foreign_currency, train$year, train$X4a_tariffs, train$X4d_control_movement_capital_ppl))
+auto.arima(dtrain$not_poverty_logit,xreg = cbind(dtrain$X2a_judicial_independence, dtrain$X2b_impartial_courts,dtrain$X2d_military_interference, dtrain$X1b_transfers,dtrain$X2e_integrity_legal_system, dtrain$X2g_restrictions_sale_real_property, dtrain$X2h_reliability_police, dtrain$X3d_freedom_own_foreign_currency, dtrain$year, dtrain$X4a_tariffs, dtrain$X4d_control_movement_capital_ppl))
+#auto.arima(cancersun$melanoma,xreg = cbind(cancersun$prevsunspot, cancersun$year))
+```
+
+## Conclusion
+
+
+
+## Bibliography
+
